@@ -1,0 +1,277 @@
+/**
+ * @author William Kim
+ * @since March, 3, 2016
+ * @version 1.0
+ * 
+ * BTRC is the sketch used to operate the Tiva 
+ * TM4C123 as a Bluetooth enabled remote controlled 
+ * car. This code implucitly enables GPIO ports as 
+ * outputs as well as enable UART for serial 
+ * communication for the Energia IDE
+ * 
+ * The sketch is used to drive one L928N H-Bridge 
+ * module which is used to control two 6V DC Motors
+ * in conjunction with PWM
+ * 
+ * This sketch also drives the exterior LEDs with 
+ * PWM
+ */
+#include <HardwareSerial.h>
+
+/* Buffer for storing data */
+char rawData[4];
+/* Defining Motor Control Pins */
+const int REP = 6; // Right Turn Enable Pin
+const int LEP = 5; // Left Turn Enable Pin
+const int FEP = 4; // Forward Enable Pin
+const int BEP = 3; // Backward Enable Pin
+const int DRP = 2; // PWM F|B Motor Control Pin
+const int DRP2 = 23; // PWM L|R Motor Control Pin
+/* Defining Exterior LED Pins */
+const int RLED = 38;  // Taillight LED
+const int FLED = 37;  // Headlight LED
+/* Defining Bluetooth State Pin */
+const int BTPin = 11;
+/* Defining Motor Governor Constants */
+const int MAX_SPD = 230;
+const int MAX_TURN_SPD = 230;
+/* Defining LED Lighting Condition */
+int LEDState = 0;
+
+/**
+ * setup function initializes serial 
+ * communication, inititalize the respective 
+ * GPIO pins, and run a system diagnostics to 
+ * ensure proper connections.
+ */
+void setup() {
+  /* Initializing Communication */
+  /* Uncomment to Debug with Serial Moniter */
+  //Serial.begin(9600); 
+  /* TTL (HC-05): Rx = PD6; Tx = PD7 */
+  Serial2.begin(9600); 
+  /* Initializing Output Pins */
+  pinMode(DRP2, OUTPUT);
+  pinMode(DRP, OUTPUT);
+  pinMode(LEP, OUTPUT);
+  pinMode(REP, OUTPUT);
+  pinMode(FEP, OUTPUT);
+  pinMode(BEP, OUTPUT);
+  pinMode(RLED, OUTPUT);
+  /* Initalizing Input Pins */
+  pinMode(BTPin, INPUT);
+  /* Initalizing System Check */
+  analogWrite(FLED, 50);
+  analogWrite(RLED, 50);
+  delay(500);
+  analogWrite(DRP2, MAX_TURN_SPD);
+  LRMotorCHECK();
+  delay(750);
+  FBMotorCHECK(0);
+  LEDCHECK();
+  /* End System Check */
+}
+
+/**
+ * loop function reads a set of bytes and 
+ * executes each commands accordingly.
+ */
+void loop() {
+  if (digitalRead(BTPin) == LOW) {
+    /* Interupter */
+    analogWrite(DRP, 0);
+    analogWrite(DRP2, 0);
+    analogWrite(FLED, 0);
+    analogWrite(RLED, 0);
+    GoStop(0);
+    TurnCenter();
+    Blink();
+  } else {
+    /* Reading and Executing Instructions */
+    if (Serial2.available() >= 4) {
+      Serial2.readBytesUntil('z', rawData, 4); 
+      /* Uncomment to Debug with Serial Moniter */
+      //Serial.println(rawData); 
+      /* Turn Logic */
+      if (rawData[0] == 'S' ) {
+        TurnCenter();
+      } else if (rawData[0] == 'L') {
+        TurnLeft();
+      } else if (rawData[0] == 'R') {
+        TurnRight();
+      }
+      /* Forward or Backward Propagation Logic */
+      if (rawData[1] == 'S') {
+      GoStop(1);
+      } else if (rawData[1] == 'F') {
+        if (rawData[2] == '5') {
+          analogWrite(DRP, MAX_SPD);
+        } else if (rawData[2] == '4') {
+          analogWrite(DRP, 190);
+        } else if (rawData[2] == '3') {
+          analogWrite(DRP, 80);
+        }
+        GoForward(1);
+      } else if (rawData[1] == 'B') {
+        if (rawData[2] == '1') {
+            analogWrite(DRP, MAX_SPD);
+          } else if (rawData[2] == '2') {
+            analogWrite(DRP, 150);
+          } else if (rawData[2] == '3') {
+            analogWrite(DRP, 80);
+          }
+        GoBackward(1);
+      } else {
+        GoStop(1);
+        TurnCenter();
+      }
+      /* Exterior LED Behavior Logic */
+      if (rawData[3] == 'E') {
+        analogWrite(FLED, 255);
+        LEDState = 1;
+      } else {
+        analogWrite(FLED, 0);
+        LEDState = 0;
+      }
+      delay(10);  // Delay for Stability
+    }
+  } 
+}
+
+/**
+ * LRMororCHECK runs a function diagnostics 
+ * on the LR turn control motor.
+ */
+void LRMotorCHECK() {
+  TurnRight();
+  delay(300);
+  TurnCenter();
+  delay(300);
+  TurnLeft();
+  delay(300);
+  TurnCenter();
+}
+
+/**
+ * FBMororCHECK runs a function diagnostics 
+ * on the FB turn control motor.
+ */
+void FBMotorCHECK(int n) {
+  analogWrite(DRP, 25);
+  GoForward(n);
+  delay(150);
+  analogWrite(DRP, 55);
+  delay(150);
+  GoStop(n);
+  delay(50);
+  analogWrite(DRP, 25);
+  GoBackward(n);
+  delay(150);
+  analogWrite(DRP, 55);
+  delay(150);
+  GoStop(n);
+}
+
+/**
+ * LEDCHECK runs a fucntion diagnostics on 
+ * the exterior LEDS
+ */
+void LEDCHECK() {
+  analogWrite(FLED, 255);
+  analogWrite(RLED, 255);
+  delay(200);
+  analogWrite(FLED, 50);
+  analogWrite(RLED, 80);
+  delay(200);
+  analogWrite(FLED, 255);
+  analogWrite(RLED, 255);
+  delay(200);
+  analogWrite(FLED, 0);
+  analogWrite(RLED, 0);
+  delay(1000);
+}
+
+/**
+ * Blink blinks the exterior LEDS for
+ * a duration of 600ms with a pause of 1s
+ */
+void Blink() {
+  analogWrite(RLED, 255);
+  analogWrite(FLED, 255);
+  delay(600);
+  analogWrite(RLED, 0);
+  analogWrite(FLED, 0);
+  delay(1000);
+}
+
+/**
+ * TurnRight enables a right turn instruction
+ */
+void TurnRight() {
+  digitalWrite(REP, HIGH);
+  digitalWrite(LEP, LOW);
+}
+
+/**
+ * TurnLeft enables a left turn instruction
+ */
+void TurnLeft() {
+  digitalWrite(REP, LOW);
+  digitalWrite(LEP, HIGH);
+}
+
+/**
+ * TurnCenter enables a no turn instruction
+ */
+void TurnCenter() {
+  digitalWrite(REP, LOW);
+  digitalWrite(LEP, LOW);
+}
+
+/**
+ * GoForward enables a forward propagation 
+ * instruction and controls the behavior of 
+ * the rear taillight leds 
+ */
+void GoForward(int LED) {
+  if (LED == 1) {
+    if (LEDState == 1) {
+      analogWrite(RLED, 20);
+    } else {
+      analogWrite(RLED, 0);
+    }
+  } 
+  digitalWrite(FEP, HIGH);
+  digitalWrite(BEP, LOW);
+}
+
+
+/**
+ * GoBackward enables a reward propagation 
+ * instruction and controls the behavior of 
+ * the rear LED taillight
+ */
+void GoBackward(int LED) {
+  if (LED == 1) {
+    if (LEDState == 1) {
+      analogWrite(RLED, 20);
+    } else {
+      analogWrite(RLED, 0);
+    }
+  } 
+  digitalWrite(FEP, LOW);
+  digitalWrite(BEP, HIGH);
+}
+
+/**
+ * GoStop enables a stop instrucntion and 
+ * controls the behavior of the rear LED 
+ * tail lights
+ */
+void GoStop(int LED) {
+  if (LED == 1) {
+    analogWrite(RLED, 255);
+  } 
+  digitalWrite(FEP, LOW);
+  digitalWrite(BEP, LOW);
+}
